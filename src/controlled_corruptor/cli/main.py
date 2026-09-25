@@ -34,7 +34,7 @@ from .. import platforms
 
 SUBCOMMANDS = {"info", "corrupt", "apply", "profiles", "diff", "demo",
                "hex", "search", "strings", "entropy", "scan", "model", "texture",
-               "batch", "sweep", "evolve", "mkprofile", "addregion", "emu"}
+               "batch", "sweep", "evolve", "mkprofile", "addregion", "emu", "verify"}
 
 
 # --------------------------------------------------------------------------
@@ -150,11 +150,13 @@ def cmd_corrupt(args) -> int:
 
     # Decide output path.
     out_path = args.output or binmod.suggest_output_name(args.input, settings.seed)
-    if os.path.abspath(out_path) == os.path.abspath(args.input) and not args.overwrite:
+    if os.path.abspath(out_path) == os.path.abspath(args.input) and not args.overwrite \
+            and not args.dry_run:
         _eprint("error: output would overwrite the source; refusing "
                 "(choose --output or pass --overwrite)")
         return 2
-    binmod.write_output(out_path, result.output, overwrite=args.overwrite)
+    if not args.dry_run:
+        binmod.write_output(out_path, result.output, overwrite=args.overwrite)
 
     # Logging / summary.
     log = result.engine_result.log
@@ -173,7 +175,13 @@ def cmd_corrupt(args) -> int:
                 f"{summary['skipped']} skipped")
         if result.checksum_repaired:
             _eprint("[INFO] Recalculated platform checksum")
-        _eprint(f"[INFO] Saved output -> {out_path}")
+        if args.dry_run:
+            from ..core.diff import changed_intervals
+            changed = changed_intervals(bf.data, result.output, merge_gap=64)
+            _eprint(f"[DRY-RUN] Would change {len(changed)} range(s); "
+                    f"output NOT written to {out_path}")
+        else:
+            _eprint(f"[INFO] Saved output -> {out_path}")
 
     if args.verbose:
         limit = args.limit if args.limit is not None else 25
@@ -210,7 +218,7 @@ def cmd_corrupt(args) -> int:
             _eprint(f"[INFO] Saved mutation report -> {args.report}")
 
     # Optional emulator launch (supports @preset names).
-    if args.launch:
+    if args.launch and not args.dry_run:
         from ..emulator import CustomCommandEmulator, resolve_launch
 
         try:
@@ -222,7 +230,8 @@ def cmd_corrupt(args) -> int:
         _eprint(f"[INFO] Launching: {' '.join(emu.build_args(out_path))}")
         emu.launch(out_path)
 
-    print(out_path)
+    if not args.dry_run:
+        print(out_path)
     return 0
 
 
@@ -251,6 +260,47 @@ def cmd_apply(args) -> int:
             _eprint("[INFO] Recalculated platform checksum")
         _eprint(f"[INFO] Saved output -> {out_path}")
     print(out_path)
+    return 0
+
+
+# --------------------------------------------------------------------------
+# verify (reproduce from project/seed and confirm)
+# --------------------------------------------------------------------------
+def cmd_verify(args) -> int:
+    bf = binmod.load_binary(args.input)
+    recipe = args.recipe
+    if recipe.lower().endswith(".ccseed"):
+        project = CorruptionSeed.load(recipe).to_project()
+    else:
+        project = CorruptionProject.load(recipe)
+
+    ok, msg = project.verify_source(bf)
+    if not ok:
+        _eprint(f"[FAIL] {msg}")
+        return 1
+    _eprint(f"[PASS] source hash matches ({bf.sha256})")
+
+    # Reproduce twice to prove determinism.
+    out1 = project.apply(bf, verify=False).output
+    out2 = project.apply(bf, verify=False).output
+    if out1 != out2:
+        _eprint("[FAIL] non-deterministic: two applies produced different output")
+        return 1
+    h = binmod.compute_hashes(out1, ("sha256",))["sha256"]
+    _eprint(f"[PASS] deterministic reproduction (output sha256 {h})")
+
+    if args.against:
+        other = binmod.load_binary(args.against)
+        if other.data == out1:
+            _eprint(f"[PASS] output matches {args.against}")
+        else:
+            from ..core.diff import diff_summary
+            s = diff_summary(other.data, out1)
+            _eprint(f"[FAIL] output does NOT match {args.against}: "
+                    f"{s['changed_ranges']} differing range(s), "
+                    f"{s['changed_bytes']} bytes")
+            return 1
+    print(h)
     return 0
 
 
@@ -897,6 +947,13 @@ def build_parser() -> argparse.ArgumentParser:
     pa.add_argument("-q", "--quiet", action="store_true")
     pa.set_defaults(func=cmd_apply)
 
+    # verify
+    pv = sub.add_parser("verify", help="reproduce a .ccproject/.ccseed and confirm it")
+    pv.add_argument("recipe", help="a .ccproject or .ccseed file")
+    pv.add_argument("input", help="the source ROM/binary")
+    pv.add_argument("--against", help="also compare the reproduction to this file")
+    pv.set_defaults(func=cmd_verify)
+
     # profiles
     pp = sub.add_parser("profiles", help="list available game profiles")
     pp.add_argument("--json", action="store_true")
@@ -1163,6 +1220,8 @@ def _add_corrupt_args(pc: argparse.ArgumentParser) -> None:
     pc.add_argument("--launch", metavar="CMD",
                     help='launch an emulator, e.g. "retroarch {ROM}"')
     pc.add_argument("--limit", type=int, default=None, help="history lines to print")
+    pc.add_argument("--dry-run", action="store_true",
+                    help="compute and report the plan without writing the output")
     pc.add_argument("-q", "--quiet", action="store_true")
     pc.add_argument("-v", "--verbose", action="store_true", help="print mutation history")
 
