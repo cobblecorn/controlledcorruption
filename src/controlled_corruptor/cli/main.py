@@ -33,7 +33,7 @@ from ..profiles import ProfileLibrary
 from .. import platforms
 
 SUBCOMMANDS = {"info", "corrupt", "apply", "profiles", "diff", "demo",
-               "hex", "search", "strings", "entropy", "scan", "model",
+               "hex", "search", "strings", "entropy", "scan", "model", "texture",
                "batch", "sweep", "evolve", "mkprofile", "addregion"}
 
 
@@ -741,6 +741,57 @@ def cmd_addregion(args) -> int:
 
 
 # --------------------------------------------------------------------------
+# texture (semantic texture corruption)
+# --------------------------------------------------------------------------
+def cmd_texture(args) -> int:
+    from ..core import texture
+    from ..core.regions import subtract_intervals
+
+    bf = binmod.load_binary(args.input)
+    plat = platforms.get(args.platform) if args.platform else platforms.detect(bf.data)
+    if not args.range:
+        _eprint("error: provide --range START:END")
+        return 2
+    start, end = args.range
+    protected = [r.interval for r in plat.protected_regions(bf.data)]
+    safe = subtract_intervals([(start, end)], protected)
+    if not safe:
+        _eprint("error: requested range is entirely protected")
+        return 2
+
+    fmt = None
+    if args.op in texture.CHANNEL_OPS:
+        fmt = texture.get_format(args.format, endian=(args.endianness or "big"))
+    settings = texture.TextureSettings(
+        op=args.op, strength=args.strength, channel_a=args.a, channel_b=args.b,
+        channel=args.channel, rotate_by=args.rotate_by,
+        entry_size=args.entry_size, seed=args.seed)
+
+    out = bytearray(bf.data)
+    log = None
+    for s, e in safe:
+        log = texture.corrupt_texture(out, s, e, fmt, settings,
+                                      region_name="texture", log=log)
+    output = bytes(out)
+    if not args.no_repair:
+        output = plat.repair_checksum(output)
+
+    out_path = args.output or binmod.suggest_output_name(args.input, args.seed)
+    if os.path.abspath(out_path) == os.path.abspath(args.input) and not args.overwrite:
+        _eprint("error: output would overwrite the source; use --output or --overwrite")
+        return 2
+    binmod.write_output(out_path, output, overwrite=args.overwrite)
+    if not args.quiet:
+        _eprint(f"[INFO] Texture op '{args.op}'"
+                + (f" ({fmt.name})" if fmt else "") + f" on {_fmt_hex(start)}-{_fmt_hex(end)}")
+        for rec in (log.records if log else []):
+            _eprint(f"    {rec.describe()}")
+        _eprint(f"[INFO] Saved output -> {out_path}")
+    print(out_path)
+    return 0
+
+
+# --------------------------------------------------------------------------
 # demo
 # --------------------------------------------------------------------------
 def cmd_demo(args) -> int:
@@ -915,6 +966,30 @@ def build_parser() -> argparse.ArgumentParser:
     psw.add_argument("--json", action="store_true")
     psw.add_argument("-q", "--quiet", action="store_true")
     psw.set_defaults(func=cmd_sweep)
+
+    # texture
+    pt = sub.add_parser("texture", help="semantic texture corruption (channels / palette)")
+    pt.add_argument("input")
+    pt.add_argument("-o", "--output")
+    pt.add_argument("--range", type=_parse_range, required=True, metavar="START:END")
+    pt.add_argument("--op", default="channel_swap",
+                    choices=["channel_shift", "channel_swap", "channel_scale",
+                             "invert", "palette_rotate", "palette_shuffle"])
+    pt.add_argument("--format", default="rgba8888",
+                    choices=["rgba8888", "rgb888", "rgba5551", "rgb565"])
+    pt.add_argument("--endianness", choices=["little", "big"], default=None)
+    pt.add_argument("--strength", type=float, default=0.5)
+    pt.add_argument("-a", type=int, default=0, help="channel A for swap")
+    pt.add_argument("-b", type=int, default=2, help="channel B for swap")
+    pt.add_argument("--channel", type=int, default=-1, help="target channel (-1 = all)")
+    pt.add_argument("--rotate-by", type=int, default=1, help="palette_rotate amount")
+    pt.add_argument("--entry-size", type=int, default=0,
+                    help="palette entry bytes (default = format bpp / 2)")
+    pt.add_argument("--seed", default="0")
+    pt.add_argument("--no-repair", action="store_true")
+    pt.add_argument("--overwrite", action="store_true")
+    pt.add_argument("-q", "--quiet", action="store_true")
+    pt.set_defaults(func=cmd_texture)
 
     # mkprofile
     pmp = sub.add_parser("mkprofile", help="author a new game profile from a ROM")
