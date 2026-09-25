@@ -9,6 +9,7 @@ from __future__ import annotations
 from typing import Dict, List, Optional
 
 from .base import PlatformAdapter
+from .elf import ELFPlatform
 from .executables import PSXEXEPlatform, XBEPlatform, XEXPlatform
 from .gba import GBAPlatform
 from .generic import GenericPlatform
@@ -16,6 +17,7 @@ from .n64 import N64Platform
 from .nds import NDSPlatform
 from .nintendo_disc import GameCubePlatform, WiiPlatform
 from .optical import ISO9660Platform
+from .pe import PEPlatform
 
 _REGISTRY: Dict[str, PlatformAdapter] = {}
 
@@ -63,6 +65,7 @@ for _a in (
     GameCubePlatform(), WiiPlatform(),
     ISO9660Platform(),
     PSXEXEPlatform(), XEXPlatform(), XBEPlatform(),
+    ELFPlatform(), PEPlatform(),
 ):
     register(_a)
 
