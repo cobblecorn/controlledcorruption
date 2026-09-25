@@ -34,7 +34,7 @@ from .. import platforms
 
 SUBCOMMANDS = {"info", "corrupt", "apply", "profiles", "diff", "demo",
                "hex", "search", "strings", "entropy", "scan", "model",
-               "batch", "sweep", "evolve"}
+               "batch", "sweep", "evolve", "mkprofile", "addregion"}
 
 
 # --------------------------------------------------------------------------
@@ -685,6 +685,62 @@ def cmd_evolve(args) -> int:
 
 
 # --------------------------------------------------------------------------
+# mkprofile / addregion (user profile authoring)
+# --------------------------------------------------------------------------
+def cmd_mkprofile(args) -> int:
+    from ..profiles import author
+
+    bf = binmod.load_binary(args.input)
+    platform = args.platform or platforms.detect(bf.data).id
+    regions = []
+    for spec in args.region or []:
+        try:
+            regions.append(author.parse_region_spec(spec))
+        except ValueError as exc:
+            _eprint(f"error: {exc}")
+            return 2
+    if args.from_diff:
+        other = binmod.load_binary(args.from_diff)
+        regions.extend(author.regions_from_diff(bf.data, other.data,
+                                                merge_gap=args.merge_gap))
+    profile = author.new_profile(bf, args.id, args.name or args.id,
+                                 platform=platform, regions=regions,
+                                 notes=args.notes)
+    out_path = args.output or f"{args.id}.json"
+    author.save_profile(profile, out_path, overwrite=args.overwrite)
+    if not args.quiet:
+        _eprint(f"[INFO] Profile '{args.id}' for {bf.filename} ({platform})")
+        _eprint(f"[INFO] SHA-256: {bf.sha256}")
+        _eprint(f"[INFO] {len(regions)} region(s); saved -> {out_path}")
+        _eprint("[INFO] Place it in a profiles dir (or set CCORRUPT_PROFILES) "
+                "to auto-match this ROM.")
+    print(out_path)
+    return 0
+
+
+def cmd_addregion(args) -> int:
+    from ..profiles import author
+
+    profile = author.load_profile(args.profile)
+    if args.range:
+        start, end = args.range
+    else:
+        _eprint("error: provide --range START:END")
+        return 2
+    region = Region(name=args.name, category=args.category, start=start, end=end,
+                    endianness=args.endianness or "little", data_type=args.data_type,
+                    tags=args.tag or [], source="user")
+    author.add_region(profile, region)
+    author.save_profile(profile, args.profile, overwrite=True)
+    if not args.quiet:
+        _eprint(f"[INFO] Added region {args.name!r} [{args.category}] "
+                f"{_fmt_hex(start)}-{_fmt_hex(end)} to {profile.id}")
+        _eprint(f"[INFO] Profile now has {len(profile.regions)} region(s)")
+    print(args.profile)
+    return 0
+
+
+# --------------------------------------------------------------------------
 # demo
 # --------------------------------------------------------------------------
 def cmd_demo(args) -> int:
@@ -859,6 +915,36 @@ def build_parser() -> argparse.ArgumentParser:
     psw.add_argument("--json", action="store_true")
     psw.add_argument("-q", "--quiet", action="store_true")
     psw.set_defaults(func=cmd_sweep)
+
+    # mkprofile
+    pmp = sub.add_parser("mkprofile", help="author a new game profile from a ROM")
+    pmp.add_argument("input")
+    pmp.add_argument("--id", required=True, help="profile id")
+    pmp.add_argument("--name", help="human-readable name")
+    pmp.add_argument("--platform", help="platform id (default: auto-detect)")
+    pmp.add_argument("--region", action="append", default=[],
+                     metavar="NAME:CAT:START:END[:ENDIAN[:DTYPE]]",
+                     help="region spec (repeatable)")
+    pmp.add_argument("--from-diff", metavar="OTHER",
+                     help="seed regions from ranges that differ vs OTHER file")
+    pmp.add_argument("--merge-gap", type=int, default=16)
+    pmp.add_argument("--notes", default="")
+    pmp.add_argument("-o", "--output", help="output JSON path (default <id>.json)")
+    pmp.add_argument("--overwrite", action="store_true")
+    pmp.add_argument("-q", "--quiet", action="store_true")
+    pmp.set_defaults(func=cmd_mkprofile)
+
+    # addregion
+    par = sub.add_parser("addregion", help="append a region to a profile JSON")
+    par.add_argument("profile")
+    par.add_argument("--name", required=True)
+    par.add_argument("--category", default="unknown")
+    par.add_argument("--range", type=_parse_range, required=True, metavar="START:END")
+    par.add_argument("--endianness", choices=["little", "big"], default=None)
+    par.add_argument("--data-type", default=None)
+    par.add_argument("--tag", action="append", default=[])
+    par.add_argument("-q", "--quiet", action="store_true")
+    par.set_defaults(func=cmd_addregion)
 
     # evolve
     pev = sub.add_parser("evolve", help="interactive keep/reject/regenerate evolution")
