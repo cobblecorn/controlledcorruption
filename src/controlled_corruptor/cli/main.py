@@ -33,7 +33,7 @@ from ..profiles import ProfileLibrary
 from .. import platforms
 
 SUBCOMMANDS = {"info", "corrupt", "apply", "profiles", "diff", "demo",
-               "hex", "search", "strings", "entropy", "scan"}
+               "hex", "search", "strings", "entropy", "scan", "model"}
 
 
 # --------------------------------------------------------------------------
@@ -454,6 +454,84 @@ def cmd_scan(args) -> int:
 
 
 # --------------------------------------------------------------------------
+# model (semantic / Level-3 corruption)
+# --------------------------------------------------------------------------
+def cmd_model(args) -> int:
+    from ..core import semantic
+    from ..core.regions import merge_intervals, subtract_intervals
+
+    bf = binmod.load_binary(args.input)
+    plat = platforms.get(args.platform) if args.platform else platforms.detect(bf.data)
+    lib = ProfileLibrary()
+    profile = lib.get(args.profile) if args.profile else lib.identify(bf.sha256)
+
+    # Resolve the target range.
+    if args.range:
+        start, end = args.range
+    elif args.region:
+        if not profile:
+            _eprint("error: --region needs a matching profile; use --range instead")
+            return 2
+        match = next((r for r in profile.regions if r.name.lower() == args.region.lower()), None)
+        if not match:
+            _eprint(f"error: region {args.region!r} not in profile {profile.id}")
+            return 2
+        start, end = match.start, match.end
+        if args.endianness is None and match.endianness:
+            args.endianness = match.endianness
+    else:
+        _eprint("error: provide --range START:END or --region NAME")
+        return 2
+
+    # Never write into protected regions.
+    protected = [r.interval for r in plat.protected_regions(bf.data)]
+    if profile:
+        protected += [r.interval for r in profile.protected]
+    safe = subtract_intervals([(start, end)], protected)
+    if not safe:
+        _eprint("error: requested range is entirely protected")
+        return 2
+    if merge_intervals(safe) != [(start, end)]:
+        _eprint(f"[WARN] range trimmed to avoid protected areas: "
+                f"{', '.join(_fmt_hex(s) + ':' + _fmt_hex(e) for s, e in safe)}")
+
+    endian = args.endianness or plat.endianness(bf.data)
+    comps = None
+    if args.components:
+        comps = [parse_offset(c) for c in args.components.split(",")]
+    layout = semantic.build_layout(stride=args.stride, component_offsets=comps,
+                                    endian=endian)
+    strengths = [args.x, args.y, args.z]
+    settings = semantic.SemanticSettings(op=args.op, strengths=strengths,
+                                         avoid_nan=not args.allow_nan, seed=args.seed)
+
+    out = bytearray(bf.data)
+    log = None
+    for s, e in safe:
+        log = semantic.corrupt_region(out, s, e, layout, settings,
+                                      region_name=(args.region or "range"), log=log)
+    output = bytes(out)
+    if not args.no_repair:
+        output = plat.repair_checksum(output)
+
+    out_path = args.output or binmod.suggest_output_name(args.input, args.seed)
+    if os.path.abspath(out_path) == os.path.abspath(args.input) and not args.overwrite:
+        _eprint("error: output would overwrite the source; use --output or --overwrite")
+        return 2
+    binmod.write_output(out_path, output, overwrite=args.overwrite)
+
+    if not args.quiet:
+        s = log.summary() if log else {"applied": 0}
+        _eprint(f"[INFO] Semantic op '{args.op}' on {endian}-endian float array "
+                f"(stride {layout.stride}, components {list(layout.component_offsets)})")
+        _eprint(f"[INFO] X={args.x} Y={args.y} Z={args.z}")
+        _eprint(f"[INFO] Components changed: {s['applied']}")
+        _eprint(f"[INFO] Saved output -> {out_path}")
+    print(out_path)
+    return 0
+
+
+# --------------------------------------------------------------------------
 # demo
 # --------------------------------------------------------------------------
 def cmd_demo(args) -> int:
@@ -569,6 +647,29 @@ def build_parser() -> argparse.ArgumentParser:
     pe.add_argument("--blocks", type=int, default=64)
     pe.add_argument("--json", action="store_true")
     pe.set_defaults(func=cmd_entropy)
+
+    # model (semantic)
+    pm = sub.add_parser("model", help="semantic corruption of a float vertex/anim array")
+    pm.add_argument("input")
+    pm.add_argument("-o", "--output")
+    pm.add_argument("--range", type=_parse_range, metavar="START:END")
+    pm.add_argument("--region", help="named region from the matched profile")
+    pm.add_argument("--profile", help="force a profile id")
+    pm.add_argument("--platform")
+    pm.add_argument("--op", default="scale",
+                    choices=["scale", "stretch", "displace", "mirror", "flatten", "reverse"])
+    pm.add_argument("--stride", type=int, default=12, help="bytes per element (default 12)")
+    pm.add_argument("--components", help="comma byte-offsets of floats in an element, e.g. 0,4,8")
+    pm.add_argument("-x", type=float, default=0.4, help="X (component 0) strength")
+    pm.add_argument("-y", type=float, default=0.4, help="Y (component 1) strength")
+    pm.add_argument("-z", type=float, default=0.4, help="Z (component 2) strength")
+    pm.add_argument("--seed", default="0")
+    pm.add_argument("--endianness", choices=["little", "big"], default=None)
+    pm.add_argument("--allow-nan", action="store_true")
+    pm.add_argument("--no-repair", action="store_true")
+    pm.add_argument("--overwrite", action="store_true")
+    pm.add_argument("-q", "--quiet", action="store_true")
+    pm.set_defaults(func=cmd_model)
 
     # scan
     psc = sub.add_parser("scan", help="experimental structure guesses")

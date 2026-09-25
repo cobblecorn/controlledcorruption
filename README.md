@@ -82,6 +82,30 @@ ccorrupt corrupt data.pak --range 0x500000:0x900000 \
     --type float32 --type byte_replace --seed 12345 -o data_c.pak
 ```
 
+### Semantic model corruption (Level 3)
+
+When a region is a float32 vertex/animation array, corrupt it *coherently*
+instead of with random noise — scale/stretch/mirror/flatten/displace/reverse
+per axis, preserving topology (index data is never touched):
+
+```bash
+# stretch the "Character Models" region on Y only, leaving X/Z intact
+ccorrupt model game.z64 --region "Character Models" \
+    --op scale -x 0.0 -y 2.0 -z 0.0 --seed CODY -o game_tall.z64
+# or a raw range with an explicit element stride
+ccorrupt model data.bin --range 0x1000:0x5000 --stride 12 --op mirror -x 1 --seed 1
+```
+
+### Reverse-engineering helpers
+
+```bash
+ccorrupt hex game.z64 --offset 0x40000 --interpret   # int/float/pointer views
+ccorrupt search game.z64 --float 1.0 --tol 0.01      # find float values
+ccorrupt strings game.z64 --min-len 6
+ccorrupt entropy game.z64                            # entropy sparkline
+ccorrupt scan game.z64                               # experimental structure guesses
+```
+
 ## Desktop GUI
 
 ```bash
