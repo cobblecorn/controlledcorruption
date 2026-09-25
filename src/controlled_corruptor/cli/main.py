@@ -22,6 +22,7 @@ import sys
 from typing import List, Optional, Sequence, Tuple
 
 from .. import __version__
+from ..core import analysis, hexview
 from ..core import binary as binmod
 from ..core.diff import diff_summary
 from ..core.pipeline import corrupt as run_corrupt
@@ -31,7 +32,8 @@ from ..core.settings import ALL_TYPES, DEFAULT_TYPES, MutationSettings
 from ..profiles import ProfileLibrary
 from .. import platforms
 
-SUBCOMMANDS = {"info", "corrupt", "apply", "profiles", "diff", "demo"}
+SUBCOMMANDS = {"info", "corrupt", "apply", "profiles", "diff", "demo",
+               "hex", "search", "strings", "entropy", "scan"}
 
 
 # --------------------------------------------------------------------------
@@ -309,6 +311,149 @@ def cmd_diff(args) -> int:
 
 
 # --------------------------------------------------------------------------
+# hex
+# --------------------------------------------------------------------------
+def cmd_hex(args) -> int:
+    bf = binmod.load_binary(args.input)
+    start = parse_offset(args.offset)
+    if start < 0 or start > bf.size:
+        _eprint(f"error: offset 0x{start:X} out of range (size 0x{bf.size:X})")
+        return 2
+    if args.interpret:
+        print(hexview.format_interpret(bf.data, start, endian=args.endianness))
+        return 0
+    length = parse_offset(args.length) if args.length is not None else 256
+    print(hexview.hex_dump(bf.data, start, length, width=args.width))
+    return 0
+
+
+# --------------------------------------------------------------------------
+# search
+# --------------------------------------------------------------------------
+def cmd_search(args) -> int:
+    bf = binmod.load_binary(args.input)
+    hits: List[int] = []
+    label = ""
+    if args.bytes is not None:
+        try:
+            pattern = bytes.fromhex(args.bytes.replace(" ", ""))
+        except ValueError:
+            _eprint("error: --bytes must be hex, e.g. 'deadbeef' or 'de ad be ef'")
+            return 2
+        hits = analysis.search_bytes(bf.data, pattern, limit=args.limit)
+        label = f"bytes {pattern.hex()}"
+    elif args.ascii is not None:
+        hits = analysis.search_bytes(bf.data, args.ascii.encode("latin-1"), limit=args.limit)
+        label = f"ascii {args.ascii!r}"
+    elif args.int is not None:
+        hits = analysis.search_int(bf.data, args.int, size=args.size,
+                                   endian=args.endianness, signed=args.signed,
+                                   limit=args.limit)
+        label = f"int {args.int} (size {args.size}, {args.endianness}, " \
+                f"{'signed' if args.signed else 'unsigned'})"
+    elif args.float is not None:
+        hits = analysis.search_float(bf.data, args.float, tol=args.tol,
+                                     endian=args.endianness, double=args.double,
+                                     limit=args.limit)
+        label = f"float ~{args.float} (tol {args.tol})"
+    else:
+        _eprint("error: provide one of --bytes / --ascii / --int / --float")
+        return 2
+
+    if args.json:
+        print(json.dumps({"query": label, "count": len(hits),
+                          "offsets": [_fmt_hex(o) for o in hits]}, indent=2))
+        return 0
+    print(f"{len(hits)} match(es) for {label}")
+    for o in hits:
+        print(f"    {_fmt_hex(o)}")
+    return 0
+
+
+# --------------------------------------------------------------------------
+# strings
+# --------------------------------------------------------------------------
+def cmd_strings(args) -> int:
+    bf = binmod.load_binary(args.input)
+    found = analysis.find_strings(bf.data, min_len=args.min_len, limit=args.limit)
+    if args.json:
+        print(json.dumps([{"offset": _fmt_hex(f.offset), "text": f.text}
+                          for f in found], indent=2))
+        return 0
+    for f in found:
+        print(f"{_fmt_hex(f.offset)}  {f.text}")
+    return 0
+
+
+# --------------------------------------------------------------------------
+# entropy
+# --------------------------------------------------------------------------
+def cmd_entropy(args) -> int:
+    bf = binmod.load_binary(args.input)
+    pairs = analysis.entropy_blocks(bf.data, blocks=args.blocks)
+    if args.json:
+        print(json.dumps([{"offset": _fmt_hex(o), "entropy": round(e, 3)}
+                          for o, e in pairs], indent=2))
+        return 0
+    spark = analysis.entropy_sparkline(pairs)
+    print(f"entropy over {len(pairs)} blocks (0..8 bits): low ' .:-' .. high '#%@'")
+    print(spark)
+    hi = [(_fmt_hex(o), round(e, 2)) for o, e in pairs if e >= 7.5]
+    if hi:
+        print(f"high-entropy blocks (>=7.5): {', '.join(f'{o}:{e}' for o, e in hi[:12])}")
+    return 0
+
+
+# --------------------------------------------------------------------------
+# scan (structure heuristics -- experimental)
+# --------------------------------------------------------------------------
+def cmd_scan(args) -> int:
+    bf = binmod.load_binary(args.input)
+    do_all = not (args.floats or args.pointers or args.strings)
+    result = {}
+    if args.floats or do_all:
+        runs = analysis.float_triplets(bf.data, endian=args.endianness)
+        result["float_triplets"] = runs
+    if args.pointers or do_all:
+        ptrs = analysis.pointer_candidates(bf.data, endian=args.endianness, limit=args.limit)
+        result["pointer_candidates"] = ptrs
+    if args.strings or do_all:
+        strs = analysis.find_strings(bf.data, min_len=6, limit=args.limit)
+        result["strings"] = strs
+
+    if args.json:
+        payload = {
+            "note": "EXPERIMENTAL / low confidence heuristics",
+            "float_triplets": [{"start": _fmt_hex(o), "count": c}
+                               for o, c in result.get("float_triplets", [])],
+            "pointer_candidates": [{"offset": _fmt_hex(o), "value": _fmt_hex(v)}
+                                   for o, v in result.get("pointer_candidates", [])[:args.limit]],
+            "strings": [{"offset": _fmt_hex(f.offset), "text": f.text}
+                        for f in result.get("strings", [])],
+        }
+        print(json.dumps(payload, indent=2))
+        return 0
+
+    print("[EXPERIMENTAL] structure guesses -- low confidence, verify manually\n")
+    if "float_triplets" in result:
+        runs = result["float_triplets"]
+        print(f"Vertex-like float32 triplet runs: {len(runs)}")
+        for o, c in runs[:args.limit]:
+            print(f"    {_fmt_hex(o)}  x{c} triplets  (~{c*12} bytes)")
+    if "pointer_candidates" in result:
+        ptrs = result["pointer_candidates"]
+        print(f"\nPointer candidates (word in [0, filesize)): {len(ptrs)}")
+        for o, v in ptrs[:args.limit]:
+            print(f"    {_fmt_hex(o)} -> {_fmt_hex(v)}")
+    if "strings" in result:
+        strs = result["strings"]
+        print(f"\nStrings (>=6 chars): {len(strs)}")
+        for f in strs[:args.limit]:
+            print(f"    {_fmt_hex(f.offset)}  {f.text}")
+    return 0
+
+
+# --------------------------------------------------------------------------
 # demo
 # --------------------------------------------------------------------------
 def cmd_demo(args) -> int:
@@ -380,6 +525,61 @@ def build_parser() -> argparse.ArgumentParser:
     pdm.add_argument("output", nargs="?", default="demo.z64")
     pdm.add_argument("--overwrite", action="store_true")
     pdm.set_defaults(func=cmd_demo)
+
+    # hex
+    ph = sub.add_parser("hex", help="hex dump, or interpret bytes at an offset")
+    ph.add_argument("input")
+    ph.add_argument("--offset", default="0", help="start offset (hex or dec)")
+    ph.add_argument("--length", default=None, help="bytes to dump (default 256)")
+    ph.add_argument("--width", type=int, default=16)
+    ph.add_argument("--interpret", action="store_true",
+                    help="show int/float/pointer interpretations at --offset")
+    ph.add_argument("--endianness", choices=["little", "big"], default="little")
+    ph.set_defaults(func=cmd_hex)
+
+    # search
+    ps = sub.add_parser("search", help="search for bytes / ascii / int / float")
+    ps.add_argument("input")
+    g = ps.add_mutually_exclusive_group()
+    g.add_argument("--bytes", help="hex pattern, e.g. deadbeef")
+    g.add_argument("--ascii", help="ascii text")
+    g.add_argument("--int", type=lambda s: int(s, 0), help="integer value")
+    g.add_argument("--float", type=float, help="float value")
+    ps.add_argument("--size", type=int, default=4, choices=[1, 2, 4, 8],
+                    help="int size in bytes")
+    ps.add_argument("--signed", action="store_true")
+    ps.add_argument("--double", action="store_true", help="treat --float as float64")
+    ps.add_argument("--tol", type=float, default=1e-3, help="float match tolerance")
+    ps.add_argument("--endianness", choices=["little", "big"], default="little")
+    ps.add_argument("--limit", type=int, default=100)
+    ps.add_argument("--json", action="store_true")
+    ps.set_defaults(func=cmd_search)
+
+    # strings
+    pstr = sub.add_parser("strings", help="list printable ASCII strings")
+    pstr.add_argument("input")
+    pstr.add_argument("--min-len", type=int, default=4)
+    pstr.add_argument("--limit", type=int, default=500)
+    pstr.add_argument("--json", action="store_true")
+    pstr.set_defaults(func=cmd_strings)
+
+    # entropy
+    pe = sub.add_parser("entropy", help="entropy sparkline across the file")
+    pe.add_argument("input")
+    pe.add_argument("--blocks", type=int, default=64)
+    pe.add_argument("--json", action="store_true")
+    pe.set_defaults(func=cmd_entropy)
+
+    # scan
+    psc = sub.add_parser("scan", help="experimental structure guesses")
+    psc.add_argument("input")
+    psc.add_argument("--floats", action="store_true", help="only vertex-like floats")
+    psc.add_argument("--pointers", action="store_true", help="only pointer candidates")
+    psc.add_argument("--strings", action="store_true", help="only strings")
+    psc.add_argument("--endianness", choices=["little", "big"], default="little")
+    psc.add_argument("--limit", type=int, default=40)
+    psc.add_argument("--json", action="store_true")
+    psc.set_defaults(func=cmd_scan)
 
     return p
 
