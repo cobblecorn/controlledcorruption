@@ -637,6 +637,7 @@ def cmd_sweep(args) -> int:
         _eprint(f"error: {exc}")
         return 2
     bf = binmod.load_binary(args.input)
+    plat = platforms.detect(bf.data)
     tester = emulator_tester(command, boot_time=args.boot_time, timeout=args.timeout)
     settings = MutationSettings(seed=0, density=args.density, magnitude=args.magnitude)
 
@@ -659,6 +660,16 @@ def cmd_sweep(args) -> int:
     if args.report:
         with open(args.report, "w", encoding="utf-8") as fh:
             json.dump(heat.to_dict(), fh, indent=2)
+    if args.export_profile:
+        from ..profiles import author
+        regions = heat.suggest_regions(min_safety=args.min_safety)
+        profile = author.new_profile(
+            bf, args.profile_id, args.profile_id, platform=plat.id,
+            regions=regions, notes="Draft profile from a guided-fuzz sweep "
+            f"(blocks with safety >= {args.min_safety}).")
+        author.save_profile(profile, args.export_profile, overwrite=True)
+        _eprint(f"[INFO] Exported {len(regions)} candidate region(s) -> "
+                f"{args.export_profile}")
     return 0
 
 
@@ -1072,6 +1083,11 @@ def build_parser() -> argparse.ArgumentParser:
     psw.add_argument("--density", type=float, default=0.05)
     psw.add_argument("--magnitude", type=float, default=0.6)
     psw.add_argument("--critical-threshold", type=float, default=0.5)
+    psw.add_argument("--min-safety", type=float, default=0.9,
+                     help="min block safety to treat as corruptible (for --export-profile)")
+    psw.add_argument("--export-profile", metavar="PATH.json",
+                     help="write a draft profile of boot-survivable regions")
+    psw.add_argument("--profile-id", default="swept", help="id for --export-profile")
     psw.add_argument("--no-repair", action="store_true")
     psw.add_argument("--report", help="write the heat map as JSON")
     psw.add_argument("--json", action="store_true")

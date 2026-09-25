@@ -20,7 +20,7 @@ from typing import Callable, List, Optional, Sequence
 
 from .binary import BinaryFile
 from .engine import Engine
-from .regions import Interval, merge_intervals, subtract_intervals
+from .regions import Interval, Region, merge_intervals, subtract_intervals
 from .settings import MutationSettings
 
 #: Outcome labels a tester may return.
@@ -80,6 +80,46 @@ class HeatMap:
 
     def critical_blocks(self, threshold: float = 0.5) -> List[BlockOutcome]:
         return [b for b in self.blocks if b.attempts and b.safety < threshold]
+
+    def suggest_regions(self, *, min_safety: float = 0.9,
+                        category: str = "unknown") -> List[Region]:
+        """Merge adjacent high-safety blocks into candidate corruptible regions.
+
+        A block whose safety is >= ``min_safety`` booted (almost) every time it
+        was corrupted, so it is a good candidate for asset data rather than
+        critical code. Adjacent qualifying blocks are coalesced. Confidence is
+        the average safety of the merged blocks (low -- this is a heuristic).
+        """
+        regions: List[Region] = []
+        run_start = None
+        run_end = None
+        run_safeties: List[float] = []
+
+        def flush():
+            if run_start is None:
+                return
+            avg = sum(run_safeties) / len(run_safeties)
+            regions.append(Region(
+                name=f"safe_{run_start:08x}", start=run_start, end=run_end,
+                category=category, confidence=round(avg, 3), source="sweep",
+                description=f"boot-survivable in sweep (avg safety {avg:.2f})"))
+
+        for b in self.blocks:
+            if b.attempts and b.safety >= min_safety:
+                if run_start is None:
+                    run_start, run_end = b.start, b.end
+                elif b.start == run_end:
+                    run_end = b.end
+                else:
+                    flush()
+                    run_start, run_end, run_safeties = b.start, b.end, []
+                run_safeties.append(b.safety)
+            else:
+                flush()
+                run_start = run_end = None
+                run_safeties = []
+        flush()
+        return regions
 
 
 def _mutable_blocks(size: int, block_size: int,
