@@ -34,7 +34,7 @@ from .. import platforms
 
 SUBCOMMANDS = {"info", "corrupt", "apply", "profiles", "diff", "demo",
                "hex", "search", "strings", "entropy", "scan", "model", "texture",
-               "batch", "sweep", "evolve", "mkprofile", "addregion"}
+               "batch", "sweep", "evolve", "mkprofile", "addregion", "emu"}
 
 
 # --------------------------------------------------------------------------
@@ -209,11 +209,16 @@ def cmd_corrupt(args) -> int:
         if not args.quiet:
             _eprint(f"[INFO] Saved mutation report -> {args.report}")
 
-    # Optional emulator launch.
+    # Optional emulator launch (supports @preset names).
     if args.launch:
-        from ..emulator import CustomCommandEmulator
+        from ..emulator import CustomCommandEmulator, resolve_launch
 
-        emu = CustomCommandEmulator(args.launch)
+        try:
+            command = resolve_launch(args.launch)
+        except KeyError as exc:
+            _eprint(f"error: {exc}")
+            return 2
+        emu = CustomCommandEmulator(command)
         _eprint(f"[INFO] Launching: {' '.join(emu.build_args(out_path))}")
         emu.launch(out_path)
 
@@ -575,8 +580,14 @@ def cmd_sweep(args) -> int:
         _eprint("error: sweep needs an emulator to classify results; pass "
                 '--launch "emulator {ROM}"')
         return 2
+    from ..emulator import resolve_launch
+    try:
+        command = resolve_launch(args.launch)
+    except KeyError as exc:
+        _eprint(f"error: {exc}")
+        return 2
     bf = binmod.load_binary(args.input)
-    tester = emulator_tester(args.launch, boot_time=args.boot_time, timeout=args.timeout)
+    tester = emulator_tester(command, boot_time=args.boot_time, timeout=args.timeout)
     settings = MutationSettings(seed=0, density=args.density, magnitude=args.magnitude)
 
     def progress(done, total, outcome):
@@ -623,8 +634,8 @@ def cmd_evolve(args) -> int:
 
     emu = None
     if args.launch:
-        from ..emulator import CustomCommandEmulator
-        emu = CustomCommandEmulator(args.launch)
+        from ..emulator import CustomCommandEmulator, resolve_launch
+        emu = CustomCommandEmulator(resolve_launch(args.launch))
 
     print("Mutation evolution. Commands:")
     print("  k = keep    r = reject/regenerate    s = save project    "
@@ -789,6 +800,49 @@ def cmd_texture(args) -> int:
         _eprint(f"[INFO] Saved output -> {out_path}")
     print(out_path)
     return 0
+
+
+# --------------------------------------------------------------------------
+# emu (emulator presets)
+# --------------------------------------------------------------------------
+def cmd_emu(args) -> int:
+    from ..emulator import EmulatorPresets
+
+    presets = EmulatorPresets()
+    action = getattr(args, "emu_action", None) or "list"
+
+    if action == "list":
+        if not presets.names():
+            print("(no emulator presets; add one with: ccorrupt emu add <name> \"<cmd> {ROM}\")")
+            return 0
+        default = presets.default()
+        for name in presets.names():
+            entry = presets.get(name)
+            mark = " *" if name == default else "  "
+            print(f"{mark}{name}: {entry['command']}")
+        print("\n* = default. Use with --launch @<name>.")
+        return 0
+    if action == "add":
+        presets.add(args.name, args.command, working_dir=args.working_dir,
+                    timeout=args.timeout, make_default=args.default)
+        presets.save()
+        print(f"added preset {args.name!r}")
+        return 0
+    if action == "remove":
+        existed = presets.remove(args.name)
+        presets.save()
+        print(f"removed {args.name!r}" if existed else f"no such preset {args.name!r}")
+        return 0 if existed else 2
+    if action == "default":
+        try:
+            presets.set_default(args.name)
+        except KeyError as exc:
+            _eprint(f"error: {exc}")
+            return 2
+        presets.save()
+        print(f"default emulator is now {args.name!r}")
+        return 0
+    return 2
 
 
 # --------------------------------------------------------------------------
@@ -966,6 +1020,26 @@ def build_parser() -> argparse.ArgumentParser:
     psw.add_argument("--json", action="store_true")
     psw.add_argument("-q", "--quiet", action="store_true")
     psw.set_defaults(func=cmd_sweep)
+
+    # emu (emulator presets)
+    pemu = sub.add_parser("emu", help="manage emulator launch presets")
+    esub = pemu.add_subparsers(dest="emu_action")
+    e_list = esub.add_parser("list", help="list presets")
+    e_list.set_defaults(func=cmd_emu)
+    e_add = esub.add_parser("add", help="add/update a preset")
+    e_add.add_argument("name")
+    e_add.add_argument("command", help='launch command, e.g. "retroarch {ROM}"')
+    e_add.add_argument("--working-dir")
+    e_add.add_argument("--timeout", type=float)
+    e_add.add_argument("--default", action="store_true", help="make this the default")
+    e_add.set_defaults(func=cmd_emu)
+    e_rm = esub.add_parser("remove", help="remove a preset")
+    e_rm.add_argument("name")
+    e_rm.set_defaults(func=cmd_emu)
+    e_def = esub.add_parser("default", help="set the default preset")
+    e_def.add_argument("name")
+    e_def.set_defaults(func=cmd_emu)
+    pemu.set_defaults(func=cmd_emu)
 
     # texture
     pt = sub.add_parser("texture", help="semantic texture corruption (channels / palette)")

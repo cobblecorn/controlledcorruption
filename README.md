@@ -100,6 +100,32 @@ ccorrupt model game.z64 --region "Character Models" \
 ccorrupt model data.bin --range 0x1000:0x5000 --stride 12 --op mirror -x 1 --seed 1
 ```
 
+### Texture corruption & emulator presets
+
+```bash
+# swap red/blue channels across an RGBA texture region
+ccorrupt texture game.z64 --range 0x120000:0x140000 --format rgba8888 \
+    --op channel_swap -a 0 -b 2 -o game_tex.z64
+# scramble a 16-bit palette
+ccorrupt texture game.z64 --range 0x140000:0x140200 --op palette_shuffle \
+    --entry-size 2 --seed 1
+
+# save an emulator once, then reuse it by name anywhere --launch is accepted
+ccorrupt emu add pj64 '"Project64.exe" "{ROM}"' --default
+ccorrupt corrupt game.z64 -t models --seed 1 -o out.z64 --launch @pj64
+```
+
+### Authoring a profile (community RE, no code)
+
+```bash
+ccorrupt mkprofile game.z64 --id my-game --name "My Game" \
+    --region "Character Models:models:0x1738000:0x18A4000:big:float32" \
+    -o my-game.json
+ccorrupt addregion my-game.json --name Audio --category audio --range 0x2200000:0x2400000
+# or seed regions from a diff against a modded dump:
+ccorrupt mkprofile game.z64 --id my-game --from-diff game_modded.z64 -o my-game.json
+```
+
 ### Reverse-engineering helpers
 
 ```bash

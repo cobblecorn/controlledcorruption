@@ -10,6 +10,7 @@ from __future__ import annotations
 from typing import Dict
 
 from .base import EmulatorAdapter, LaunchStatus
+from .config import EmulatorPresets, resolve_launch
 from .custom import CustomCommandEmulator
 
 #: Handy starting templates; users edit paths to match their install.
@@ -24,4 +25,5 @@ PRESETS: Dict[str, str] = {
     "custom": '"{ROM}"',
 }
 
-__all__ = ["EmulatorAdapter", "LaunchStatus", "CustomCommandEmulator", "PRESETS"]
+__all__ = ["EmulatorAdapter", "LaunchStatus", "CustomCommandEmulator",
+           "EmulatorPresets", "resolve_launch", "PRESETS"]
