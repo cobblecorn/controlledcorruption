@@ -170,19 +170,28 @@ Drop it in `profiles/`, `~/.config/ccorrupt/profiles/`, or a directory named in
 
 ## Consoles & roadmap
 
-Working platform adapters: **Generic**, **Nintendo 64** (byte-order aware,
-CIC checksum repair), **Game Boy Advance** (header checksum repair),
-**Nintendo DS** (header CRC-16 repair). Everything else works **today in
-Generic mode** (open the file, set ranges/regions), and gets safer as
-dedicated adapters land.
+Working platform adapters:
 
-Roadmap adapters (disc/cartridge/container aware): PS1, PS2, GameCube, Wii,
-PSP — and, as requested, **PlayStation 3/4 and Xbox 360 / Xbox One**
-(Xenia-oriented). Those are large ISO/XEX/PKG container formats; the generic
-engine already corrupts them, and adapters will add structure awareness
-(headers, filesystems, executable regions, checksum/repair). See
-[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for how to add one — it is a
-single new file implementing `PlatformAdapter`.
+| Adapter | Detects | Protects | Checksum repair |
+|---------|---------|----------|-----------------|
+| `n64` | Nintendo 64 (z64/v64/n64) | header + boot | ✅ CIC CRC |
+| `gba` | Game Boy Advance | 192-byte header | ✅ header byte |
+| `nds` | Nintendo DS | 0x200 header | ✅ CRC-16 |
+| `gamecube` | GameCube disc | disc header | — |
+| `wii` | Wii disc | disc header (warns on partitions) | — |
+| `iso9660` | ISO discs (PS1/PS2/PSP images) | 16-sector system area | — |
+| `psx-exe` | PlayStation executable | PS-X EXE header | — |
+| `xex` | **Xbox 360** executable (XEX2) | header | — |
+| `xbe` | **Original Xbox** executable (XBEH) | header | — |
+| `generic` | anything | nothing (user-marked only) | — |
+
+Everything not listed still works **today in Generic mode** (open the file, set
+ranges/regions). Adding structure awareness for a new format is a single file
+implementing `PlatformAdapter` — see [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
+
+Roadmap: deeper disc awareness (PS2/PSP filesystem + per-partition Wii hashes,
+Xbox XISO/XDVDFS, PS3/PS4 PKG), so corruption can target individual on-disc
+files and repair per-section integrity fields.
 
 Longer term (see the handoff design): visual ROM map editing, hex viewer with
 type interpretation, semantic model/animation/texture corruption, guided

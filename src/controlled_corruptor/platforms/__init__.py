@@ -9,10 +9,13 @@ from __future__ import annotations
 from typing import Dict, List, Optional
 
 from .base import PlatformAdapter
+from .executables import PSXEXEPlatform, XBEPlatform, XEXPlatform
 from .gba import GBAPlatform
 from .generic import GenericPlatform
 from .n64 import N64Platform
 from .nds import NDSPlatform
+from .nintendo_disc import GameCubePlatform, WiiPlatform
+from .optical import ISO9660Platform
 
 _REGISTRY: Dict[str, PlatformAdapter] = {}
 
@@ -54,7 +57,13 @@ def detect(data: bytes) -> PlatformAdapter:
     return best or _REGISTRY["generic"]
 
 
-for _a in (GenericPlatform(), N64Platform(), GBAPlatform(), NDSPlatform()):
+for _a in (
+    GenericPlatform(),
+    N64Platform(), GBAPlatform(), NDSPlatform(),
+    GameCubePlatform(), WiiPlatform(),
+    ISO9660Platform(),
+    PSXEXEPlatform(), XEXPlatform(), XBEPlatform(),
+):
     register(_a)
 
 
