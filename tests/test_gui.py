@@ -21,7 +21,6 @@ try:  # a QApplication must be constructable (needs Qt platform libs)
 except Exception as exc:  # pragma: no cover - environment dependent
     pytest.skip(f"Qt platform unavailable: {exc}", allow_module_level=True)
 
-from controlled_corruptor.core.diff import changed_intervals  # noqa: E402
 from controlled_corruptor.demo import build_demo_rom  # noqa: E402
 from controlled_corruptor.ui.main_window import MainWindow  # noqa: E402
 

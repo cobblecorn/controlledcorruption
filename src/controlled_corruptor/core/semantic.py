@@ -16,7 +16,7 @@ from __future__ import annotations
 import math
 import struct
 from dataclasses import dataclass, field
-from typing import List, Optional, Sequence, Tuple
+from typing import Optional, Sequence
 
 from .history import MutationLog, MutationRecord
 from .prng import Rng

@@ -16,7 +16,6 @@ Neither format ever stores copyrighted ROM contents -- only hashes and offsets.
 from __future__ import annotations
 
 import json
-import os
 from dataclasses import dataclass, field
 from typing import List, Optional, Sequence, Tuple
 

@@ -38,7 +38,7 @@ def test_byte_replace_changes_one_byte():
 def test_bit_flip_only_flips_bits():
     data = bytes([0b10101010] * 32)
     ctx = _ctx(data, [(0, 32)])
-    rec = mut.get("bit_flip").apply(ctx, 0)
+    mut.get("bit_flip").apply(ctx, 0)
     # only one byte changed and only via XOR (same popcount distance)
     changed = [i for i in range(32) if ctx.out[i] != data[i]]
     assert len(changed) == 1

@@ -9,7 +9,6 @@ from controlled_corruptor.core.pipeline import corrupt
 from controlled_corruptor.core.project import (
     CorruptionProject, CorruptionSeed, Layer,
 )
-from controlled_corruptor.core.regions import Region
 from controlled_corruptor.core.settings import MutationSettings
 
 
@@ -42,7 +41,6 @@ def test_project_verify_source(sample_data):
 
 def test_apply_matches_direct_corrupt(sample_data):
     bf = _binary(sample_data)
-    targets = [Region("body", 0x100, 0x3F00, category="models")]
     settings = MutationSettings(seed="match", density=0.02, magnitude=0.4)
 
     # direct

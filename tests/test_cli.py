@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import hashlib
-import os
 
 from controlled_corruptor.cli.main import main
 from controlled_corruptor.demo import build_demo_rom

@@ -6,7 +6,7 @@ import struct
 
 import pytest
 
-from controlled_corruptor.core import Region, from_bytes
+from controlled_corruptor.core import Region
 from controlled_corruptor.core.prng import Rng
 
 

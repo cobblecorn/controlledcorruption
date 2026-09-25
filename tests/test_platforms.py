@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import struct
 
 from controlled_corruptor import platforms
 from controlled_corruptor.core.prng import Rng

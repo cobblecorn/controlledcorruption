@@ -28,7 +28,7 @@ from ..core.regions import subtract_intervals
 from ..core.settings import ALL_TYPES, DEFAULT_TYPES, MutationSettings
 from ..profiles import ProfileLibrary
 from .. import platforms
-from .rommap import RomMapWidget, category_color
+from .rommap import RomMapWidget
 
 
 class MainWindow(QMainWindow):

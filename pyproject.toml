@@ -44,3 +44,11 @@ controlled_corruptor = ["py.typed"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py39"
+
+[tool.ruff.lint]
+# pyflakes (F), pycodestyle errors (E9), unused imports/vars covered by F.
+select = ["F", "E9"]
