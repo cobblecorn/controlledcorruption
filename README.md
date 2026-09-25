@@ -33,6 +33,7 @@ MVP is complete and tested (72 tests). Working today:
 - ✅ Semantic model/vertex corruption (Level 3: scale/mirror/flatten/… by axis)
 - ✅ Reverse-engineering helpers (hex viewer, search, strings, entropy, scan)
 - ✅ Batch generation across seeds + guided-fuzz region sweep (emulator-agnostic)
+- ✅ Interactive mutation evolution (keep/reject/regenerate, non-destructive)
 
 The original file is **never** modified, and project files never store ROM
 contents — only hashes and offsets.

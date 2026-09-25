@@ -34,7 +34,7 @@ from .. import platforms
 
 SUBCOMMANDS = {"info", "corrupt", "apply", "profiles", "diff", "demo",
                "hex", "search", "strings", "entropy", "scan", "model",
-               "batch", "sweep"}
+               "batch", "sweep", "evolve"}
 
 
 # --------------------------------------------------------------------------
@@ -602,6 +602,89 @@ def cmd_sweep(args) -> int:
 
 
 # --------------------------------------------------------------------------
+# evolve (interactive keep/reject/regenerate)
+# --------------------------------------------------------------------------
+def cmd_evolve(args) -> int:
+    from ..core.evolve import Evolver
+
+    bf = binmod.load_binary(args.input)
+    plat = platforms.get(args.platform) if args.platform else platforms.detect(bf.data)
+    lib = ProfileLibrary()
+    profile = lib.get(args.profile) if args.profile else lib.identify(bf.sha256)
+    out_path = args.output or binmod.suggest_output_name(args.input, "evolve")
+
+    evolver = Evolver(
+        binary=bf, platform=plat, profile=profile,
+        categories=args.target or None,
+        repair_checksum=not args.no_repair,
+        base_settings=MutationSettings(density=args.density, magnitude=args.magnitude,
+                                       types=args.type or list(DEFAULT_TYPES)),
+    )
+
+    emu = None
+    if args.launch:
+        from ..emulator import CustomCommandEmulator
+        emu = CustomCommandEmulator(args.launch)
+
+    print("Mutation evolution. Commands:")
+    print("  k = keep    r = reject/regenerate    s = save project    "
+          "u = undo last kept    q = quit")
+    counter = 0
+
+    def make_candidate():
+        nonlocal counter
+        counter += 1
+        seed = f"{args.seed_prefix}-{counter}"
+        cand = evolver.propose(seed, intensity=args.intensity)
+        binmod.write_output(out_path, cand.output, overwrite=True)
+        applied = cand.log.summary()["applied"]
+        print(f"\nGeneration {cand.generation} (seed {seed}): "
+              f"{applied} total mutations across {len(evolver.kept) + 1} layer(s)")
+        print(f"  wrote {out_path}")
+        if emu:
+            print(f"  launching: {' '.join(emu.build_args(out_path))}")
+            emu.launch(out_path)
+        return cand
+
+    make_candidate()
+    while True:
+        try:
+            choice = input("[k/r/s/u/q]> ").strip().lower()
+        except EOFError:
+            break
+        if choice in ("q", "quit"):
+            break
+        elif choice in ("k", "keep"):
+            evolver.keep()
+            print(f"  kept. stack now {len(evolver.kept)} layer(s).")
+            make_candidate()
+        elif choice in ("r", "reject", "n", "new"):
+            evolver.reject()
+            make_candidate()
+        elif choice in ("u", "undo"):
+            removed = evolver.undo()
+            print(f"  undid {removed.name if removed else '(nothing)'}")
+            binmod.write_output(out_path, evolver.current_output(), overwrite=True)
+        elif choice in ("s", "save"):
+            proj_path = args.save_project or (os.path.splitext(out_path)[0] + ".ccproject")
+            evolver.to_project().save(proj_path)
+            print(f"  saved project -> {proj_path}")
+        else:
+            print("  ? commands: k keep, r regenerate, s save, u undo, q quit")
+
+    # On exit, the file on disk should reflect the KEPT stack (what the saved
+    # project reproduces), not a dangling unkept proposal.
+    evolver.reject()
+    binmod.write_output(out_path, evolver.current_output(), overwrite=True)
+    if args.save_project:
+        evolver.to_project().save(args.save_project)
+        print(f"Saved evolved project -> {args.save_project}")
+    print(f"Kept {len(evolver.kept)} generation(s); final output at {out_path} "
+          f"(matches the saved project)")
+    return 0
+
+
+# --------------------------------------------------------------------------
 # demo
 # --------------------------------------------------------------------------
 def cmd_demo(args) -> int:
@@ -776,6 +859,23 @@ def build_parser() -> argparse.ArgumentParser:
     psw.add_argument("--json", action="store_true")
     psw.add_argument("-q", "--quiet", action="store_true")
     psw.set_defaults(func=cmd_sweep)
+
+    # evolve
+    pev = sub.add_parser("evolve", help="interactive keep/reject/regenerate evolution")
+    pev.add_argument("input")
+    pev.add_argument("-o", "--output")
+    pev.add_argument("-t", "--target", action="append", default=[])
+    pev.add_argument("-m", "--type", action="append", default=[])
+    pev.add_argument("--profile")
+    pev.add_argument("--platform")
+    pev.add_argument("--density", type=float, default=0.005)
+    pev.add_argument("--magnitude", type=float, default=0.4)
+    pev.add_argument("--intensity", type=float, default=None)
+    pev.add_argument("--seed-prefix", default="gen")
+    pev.add_argument("--launch", metavar="CMD", help="emulator command with {ROM}")
+    pev.add_argument("--no-repair", action="store_true")
+    pev.add_argument("--save-project", metavar="PATH.ccproject")
+    pev.set_defaults(func=cmd_evolve)
 
     # scan
     psc = sub.add_parser("scan", help="experimental structure guesses")
