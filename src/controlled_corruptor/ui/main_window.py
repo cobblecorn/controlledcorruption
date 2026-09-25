@@ -11,16 +11,20 @@ import os
 from typing import List, Optional
 
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
     QCheckBox, QComboBox, QDoubleSpinBox, QFileDialog, QFormLayout, QGroupBox,
     QHBoxLayout, QLabel, QLineEdit, QListWidget, QMainWindow, QMessageBox,
-    QPushButton, QScrollArea, QSplitter, QVBoxLayout, QWidget,
+    QPlainTextEdit, QPushButton, QScrollArea, QSpinBox, QSplitter, QVBoxLayout,
+    QWidget,
 )
 
 from ..core import binary as binmod
+from ..core import hexview, semantic
 from ..core.diff import changed_intervals
 from ..core.pipeline import corrupt as run_corrupt, gather_regions
 from ..core.project import CorruptionProject
+from ..core.regions import subtract_intervals
 from ..core.settings import ALL_TYPES, DEFAULT_TYPES, MutationSettings
 from ..profiles import ProfileLibrary
 from .. import platforms
@@ -45,6 +49,15 @@ class MainWindow(QMainWindow):
         self._build_ui()
         self._build_menu()
         self._set_enabled(False)
+
+    @staticmethod
+    def _axis_spin(default: float) -> QDoubleSpinBox:
+        s = QDoubleSpinBox()
+        s.setDecimals(2)
+        s.setRange(0.0, 8.0)
+        s.setSingleStep(0.1)
+        s.setValue(default)
+        return s
 
     # -- construction -------------------------------------------------------
     def _build_ui(self):
@@ -109,6 +122,27 @@ class MainWindow(QMainWindow):
             types_layout.addWidget(cb)
         left_layout.addWidget(types_box)
 
+        # Semantic (Level-3) model corruption controls.
+        self.sem_box = QGroupBox("Semantic model mode (float regions)")
+        self.sem_box.setCheckable(True)
+        self.sem_box.setChecked(False)
+        sem_form = QFormLayout(self.sem_box)
+        self.combo_sem_op = QComboBox()
+        for op in semantic.OPS:
+            self.combo_sem_op.addItem(op)
+        self.spin_stride = QSpinBox()
+        self.spin_stride.setRange(4, 256)
+        self.spin_stride.setValue(12)
+        self.spin_sx = self._axis_spin(0.4)
+        self.spin_sy = self._axis_spin(0.4)
+        self.spin_sz = self._axis_spin(0.4)
+        sem_form.addRow("Op:", self.combo_sem_op)
+        sem_form.addRow("Stride:", self.spin_stride)
+        sem_form.addRow("X strength:", self.spin_sx)
+        sem_form.addRow("Y strength:", self.spin_sy)
+        sem_form.addRow("Z strength:", self.spin_sz)
+        left_layout.addWidget(self.sem_box)
+
         btn_row = QHBoxLayout()
         self.btn_generate = QPushButton("Generate")
         self.btn_generate.clicked.connect(self.on_generate)
@@ -131,8 +165,9 @@ class MainWindow(QMainWindow):
                                       "white = changed bytes)"))
         self.rom_map = RomMapWidget()
         self.rom_map.offset_hovered.connect(self._on_hover)
+        self.rom_map.offset_clicked.connect(self._show_hex_at)
         right_layout.addWidget(self.rom_map)
-        self.lbl_hover = QLabel("offset: -")
+        self.lbl_hover = QLabel("offset: - (click the map to inspect bytes)")
         right_layout.addWidget(self.lbl_hover)
 
         right_layout.addWidget(QLabel("Mutation history"))
@@ -140,6 +175,13 @@ class MainWindow(QMainWindow):
         right_layout.addWidget(self.history, 1)
         self.lbl_summary = QLabel("-")
         right_layout.addWidget(self.lbl_summary)
+
+        right_layout.addWidget(QLabel("Hex / value inspector (click the ROM map)"))
+        self.hex_view = QPlainTextEdit()
+        self.hex_view.setReadOnly(True)
+        self.hex_view.setFont(QFont("monospace"))
+        self.hex_view.setMaximumHeight(180)
+        right_layout.addWidget(self.hex_view)
 
         central.addWidget(scroll)
         central.addWidget(right)
@@ -248,31 +290,42 @@ class MainWindow(QMainWindow):
     def on_generate(self):
         if not self.binary:
             return
-        settings = self._build_settings()
         try:
-            result = run_corrupt(
-                self.binary, settings,
-                categories=self._selected_categories(),
-                profile=self.profile,
-                platform=self._selected_platform(),
-                repair_checksum=self.chk_repair.isChecked(),
-            )
+            if self.sem_box.isChecked():
+                output, log = self._run_semantic()
+                summary = log.summary() if log else {"applied": 0, "skipped": 0}
+                records = log.records if log else []
+                mutable = None
+                repaired = False
+            else:
+                settings = self._build_settings()
+                result = run_corrupt(
+                    self.binary, settings,
+                    categories=self._selected_categories(),
+                    profile=self.profile,
+                    platform=self._selected_platform(),
+                    repair_checksum=self.chk_repair.isChecked(),
+                )
+                output = result.output
+                summary = result.engine_result.log.summary()
+                records = result.engine_result.log.records
+                mutable = result.engine_result.mutable_bytes
+                repaired = result.checksum_repaired
         except Exception as exc:  # pragma: no cover - GUI guard
             QMessageBox.critical(self, "Corruption failed", str(exc))
             return
 
-        self.output_bytes = result.output
-        changed = changed_intervals(self.binary.data, result.output, merge_gap=64)
+        self.output_bytes = output
+        changed = changed_intervals(self.binary.data, output, merge_gap=64)
         self.rom_map.set_changed(changed)
 
         self.history.clear()
-        for rec in result.engine_result.log.records[:2000]:
+        for rec in records[:2000]:
             self.history.addItem(rec.describe())
-        s = result.engine_result.log.summary()
+        extra = f"mutable {mutable:,} bytes" if mutable is not None else "semantic mode"
         self.lbl_summary.setText(
-            f"{s['applied']} applied, {s['skipped']} skipped; "
-            f"mutable {result.engine_result.mutable_bytes:,} bytes"
-            + ("; checksum repaired" if result.checksum_repaired else ""))
+            f"{summary['applied']} applied, {summary.get('skipped', 0)} skipped; "
+            f"{extra}" + ("; checksum repaired" if repaired else ""))
         self._set_enabled(True)
 
     def on_save_output(self):
@@ -327,6 +380,40 @@ class MainWindow(QMainWindow):
             for c, cb in self.category_checks.items():
                 cb.setChecked(bool(layer.categories) and c in layer.categories)
         self.on_generate()
+
+    def _show_hex_at(self, offset: int):
+        if not self.binary:
+            return
+        start = max(0, offset - (offset % 16) - 32)
+        dump = hexview.hex_dump(self.binary.data, start, 128, width=16)
+        interp = hexview.format_interpret(self.binary.data, offset,
+                                          endian=self.platform.endianness(self.binary.data)
+                                          if self.platform else "little")
+        self.hex_view.setPlainText(dump + "\n\n" + interp)
+
+    def _run_semantic(self):
+        """Apply semantic model corruption to selected float regions."""
+        cats = self._selected_categories()
+        regions = [r for r in self.targets
+                   if r.mutable and (cats is None or r.matches(cats))]
+        protected = [r.interval for r in self.protected]
+        endian = self.platform.endianness(self.binary.data) if self.platform else "little"
+        layout = semantic.build_layout(stride=self.spin_stride.value(), endian=endian)
+        settings = semantic.SemanticSettings(
+            op=self.combo_sem_op.currentText(),
+            strengths=[self.spin_sx.value(), self.spin_sy.value(), self.spin_sz.value()],
+            seed=self.edit_seed.text().strip() or "0",
+        )
+        out = bytearray(self.binary.data)
+        log = None
+        for r in regions:
+            for s, e in subtract_intervals([r.interval], protected):
+                log = semantic.corrupt_region(out, s, e, layout, settings,
+                                              region_name=r.name, log=log)
+        output = bytes(out)
+        if self.chk_repair.isChecked() and self.platform:
+            output = self.platform.repair_checksum(output)
+        return output, log
 
     def _on_hover(self, offset: int):
         region = None
