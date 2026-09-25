@@ -1,0 +1,52 @@
+{
+  "id": "example-n64-game",
+  "name": "Example N64 Game (TEMPLATE)",
+  "platform": "n64",
+  "notes": "TEMPLATE profile. Replace the sha256 with your ROM's real hash (see `ccorrupt info <rom>`) and adjust region offsets from your own reverse engineering / community docs. Regions below are illustrative placeholders, not real addresses for any game.",
+  "inherit_platform_protected": true,
+  "identification": {
+    "sha256": [
+      "REPLACE_WITH_REAL_SHA256_FROM_ccorrupt_info"
+    ]
+  },
+  "protected": [
+    {
+      "name": "Pointer Table",
+      "category": "filesystem",
+      "start": "0x00001000",
+      "end": "0x00002000",
+      "description": "Example of a profile-defined protected region."
+    }
+  ],
+  "regions": [
+    {
+      "name": "Character Models",
+      "category": "models",
+      "start": "0x01738000",
+      "end": "0x018A4000",
+      "endianness": "big",
+      "data_type": "float32",
+      "tags": ["player", "model", "geometry"]
+    },
+    {
+      "name": "Animations",
+      "category": "animations",
+      "start": "0x02200000",
+      "end": "0x02390000",
+      "endianness": "big"
+    },
+    {
+      "name": "Textures",
+      "category": "textures",
+      "start": "0x02800000",
+      "end": "0x02C00000",
+      "data_type": "raw"
+    },
+    {
+      "name": "Maps",
+      "category": "maps",
+      "start": "0x03000000",
+      "end": "0x03400000"
+    }
+  ]
+}

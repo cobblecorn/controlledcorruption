@@ -1,0 +1,46 @@
+[build-system]
+requires = ["setuptools>=64", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "controlled-corruptor"
+version = "0.1.0"
+description = "Deterministic, region-aware ROM/binary corruption framework"
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+authors = [{ name = "Controlled Corruptor contributors" }]
+keywords = ["rom", "corruption", "binary", "modding", "reverse-engineering", "fuzzing"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Topic :: Software Development :: Testing",
+]
+dependencies = []
+
+[project.optional-dependencies]
+gui = ["PySide6>=6.5"]
+yaml = ["PyYAML>=6.0"]
+dev = ["pytest>=7.0"]
+
+[project.scripts]
+ccorrupt = "controlled_corruptor.cli.main:main"
+controlledcorruptor = "controlled_corruptor.cli.main:main"
+
+[project.gui-scripts]
+ccorrupt-gui = "controlled_corruptor.ui.app:main"
+
+[tool.setuptools]
+package-dir = { "" = "src" }
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+controlled_corruptor = ["py.typed"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]

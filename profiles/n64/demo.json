@@ -1,0 +1,47 @@
+{
+  "id": "cc-demo-n64",
+  "name": "Controlled Corruptor Demo ROM",
+  "platform": "n64",
+  "notes": "Synthetic demo ROM shipped with the tool. NOT a real game. Use `ccorrupt demo <path>` to generate the matching file, then corrupt it to see the full pipeline.",
+  "inherit_platform_protected": true,
+  "identification": {
+    "sha256": [
+      "14c27ce4fe12521d6faa82eb41f9bb3025822aa9ef79fb6b49ab54bcd5edd660"
+    ]
+  },
+  "regions": [
+    {
+      "name": "Demo Code",
+      "category": "executable",
+      "start": "0x00001000",
+      "end": "0x00040000",
+      "mutable": false,
+      "description": "Protected by default; demonstrates category-level protection."
+    },
+    {
+      "name": "Character Models",
+      "category": "models",
+      "start": "0x00040000",
+      "end": "0x00080000",
+      "endianness": "big",
+      "data_type": "float32",
+      "tags": ["player", "geometry"],
+      "description": "float32 vertex-like triplets."
+    },
+    {
+      "name": "Animations",
+      "category": "animations",
+      "start": "0x00080000",
+      "end": "0x000C0000",
+      "endianness": "big",
+      "data_type": "float32"
+    },
+    {
+      "name": "Textures",
+      "category": "textures",
+      "start": "0x000C0000",
+      "end": "0x00101000",
+      "data_type": "raw"
+    }
+  ]
+}

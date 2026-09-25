@@ -1,0 +1,40 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+*.egg
+build/
+dist/
+.eggs/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+env/
+
+# Editors / OS
+.vscode/
+.idea/
+*.swp
+.DS_Store
+
+# Tool artifacts / user data (never commit ROMs or corrupted output)
+*.z64
+*.n64
+*.v64
+*.nds
+*.gba
+*.iso
+*.img
+*.rom
+*.bin
+*.dat
+*.ccproject
+*.ccseed
+!profiles/**/*.json
+!profiles/**/*.yaml
+!profiles/**/*.yml
+
+# but keep any explicitly-checked-in sample data
+!tests/**/fixtures/**
