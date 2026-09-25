@@ -25,7 +25,8 @@ MVP is complete and tested (72 tests). Working today:
 - ✅ Non-destructive mutation stack (layers) — toggle a layer, regenerate
 - ✅ Save / load projects (`.ccproject`) and shareable recipes (`.ccseed`)
 - ✅ CLI **and** desktop GUI (they share one core)
-- ✅ Platform adapters: Generic, **Nintendo 64** (with real checksum repair)
+- ✅ Platform adapters: Generic, **Nintendo 64**, **GBA**, **Nintendo DS**
+  (each header-aware, with checksum/CRC repair)
 - ✅ External JSON/YAML game profiles (+ an example + a runnable demo)
 - ✅ Emulator launcher (custom command with `{ROM}`)
 - ✅ Differential analysis (turn a modded ROM into regions)
@@ -143,11 +144,13 @@ Drop it in `profiles/`, `~/.config/ccorrupt/profiles/`, or a directory named in
 ## Consoles & roadmap
 
 Working platform adapters: **Generic**, **Nintendo 64** (byte-order aware,
-CIC checksum repair). Everything else works **today in Generic mode** (open the
-file, set ranges/regions), and gets safer as dedicated adapters land.
+CIC checksum repair), **Game Boy Advance** (header checksum repair),
+**Nintendo DS** (header CRC-16 repair). Everything else works **today in
+Generic mode** (open the file, set ranges/regions), and gets safer as
+dedicated adapters land.
 
 Roadmap adapters (disc/cartridge/container aware): PS1, PS2, GameCube, Wii,
-GBA, DS, PSP — and, as requested, **PlayStation 3/4 and Xbox 360 / Xbox One**
+PSP — and, as requested, **PlayStation 3/4 and Xbox 360 / Xbox One**
 (Xenia-oriented). Those are large ISO/XEX/PKG container formats; the generic
 engine already corrupts them, and adapters will add structure awareness
 (headers, filesystems, executable regions, checksum/repair). See
