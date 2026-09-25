@@ -33,7 +33,8 @@ from ..profiles import ProfileLibrary
 from .. import platforms
 
 SUBCOMMANDS = {"info", "corrupt", "apply", "profiles", "diff", "demo",
-               "hex", "search", "strings", "entropy", "scan", "model"}
+               "hex", "search", "strings", "entropy", "scan", "model",
+               "batch", "sweep"}
 
 
 # --------------------------------------------------------------------------
@@ -532,6 +533,75 @@ def cmd_model(args) -> int:
 
 
 # --------------------------------------------------------------------------
+# batch
+# --------------------------------------------------------------------------
+def cmd_batch(args) -> int:
+    from ..core.batch import generate_batch, seed_series
+
+    bf = binmod.load_binary(args.input)
+    settings = MutationSettings(seed=0, density=args.density, magnitude=args.magnitude,
+                                types=args.type or list(DEFAULT_TYPES))
+    seeds = (args.seed if args.seed else
+             seed_series(args.count, prefix=args.seed_prefix, start=args.start_seed))
+    items = generate_batch(bf, settings, seeds, categories=args.target or None,
+                           profile_id=args.profile, auto_identify=not args.no_auto,
+                           repair_checksum=not args.no_repair)
+    os.makedirs(args.outdir, exist_ok=True)
+    base, ext = os.path.splitext(os.path.basename(args.input))
+    manifest = []
+    for item in items:
+        tag = "".join(ch for ch in str(item.seed) if ch.isalnum()) or "seed"
+        out_path = os.path.join(args.outdir, f"{base}_{tag}{ext}")
+        binmod.write_output(out_path, item.output, overwrite=True)
+        manifest.append({"seed": item.seed, "file": out_path, "summary": item.summary})
+        if not args.quiet:
+            _eprint(f"[INFO] {out_path}  ({item.summary['applied']} mutations)")
+    if args.manifest:
+        with open(args.manifest, "w", encoding="utf-8") as fh:
+            json.dump({"source": bf.sha256, "items": manifest}, fh, indent=2)
+        if not args.quiet:
+            _eprint(f"[INFO] Wrote manifest -> {args.manifest}")
+    print(f"{len(items)} variants -> {args.outdir}")
+    return 0
+
+
+# --------------------------------------------------------------------------
+# sweep (guided fuzz -- needs an emulator)
+# --------------------------------------------------------------------------
+def cmd_sweep(args) -> int:
+    from ..core.fuzz import emulator_tester, sweep
+
+    if not args.launch:
+        _eprint("error: sweep needs an emulator to classify results; pass "
+                '--launch "emulator {ROM}"')
+        return 2
+    bf = binmod.load_binary(args.input)
+    tester = emulator_tester(args.launch, boot_time=args.boot_time, timeout=args.timeout)
+    settings = MutationSettings(seed=0, density=args.density, magnitude=args.magnitude)
+
+    def progress(done, total, outcome):
+        if not args.quiet:
+            _eprint(f"[{done}/{total}] 0x{outcome.start:08X} "
+                    f"safety={outcome.safety:.2f}")
+
+    heat = sweep(bf, tester, block_size=args.block_size, settings=settings,
+                 trials=args.trials, on_progress=progress,
+                 repair_checksum=not args.no_repair)
+    if args.json:
+        print(json.dumps(heat.to_dict(), indent=2))
+    else:
+        print(heat.render())
+        crit = heat.critical_blocks(threshold=args.critical_threshold)
+        print(f"\nCritical blocks (safety < {args.critical_threshold}): {len(crit)}")
+        for b in crit[:20]:
+            print(f"    0x{b.start:08X}-0x{b.end:08X}  safety={b.safety:.2f}")
+    if args.report:
+        with open(args.report, "w", encoding="utf-8") as fh:
+            json.dump(heat.to_dict(), fh, indent=2)
+    return 0
+
+
+# --------------------------------------------------------------------------
 # demo
 # --------------------------------------------------------------------------
 def cmd_demo(args) -> int:
@@ -670,6 +740,42 @@ def build_parser() -> argparse.ArgumentParser:
     pm.add_argument("--overwrite", action="store_true")
     pm.add_argument("-q", "--quiet", action="store_true")
     pm.set_defaults(func=cmd_model)
+
+    # batch
+    pb = sub.add_parser("batch", help="generate many corrupted variants across seeds")
+    pb.add_argument("input")
+    pb.add_argument("-o", "--outdir", default="corruptions")
+    pb.add_argument("--count", type=int, default=10)
+    pb.add_argument("--seed", action="append", default=[], help="explicit seed (repeatable)")
+    pb.add_argument("--seed-prefix", default="")
+    pb.add_argument("--start-seed", type=int, default=0)
+    pb.add_argument("-t", "--target", action="append", default=[])
+    pb.add_argument("-m", "--type", action="append", default=[])
+    pb.add_argument("--profile")
+    pb.add_argument("--no-auto", action="store_true")
+    pb.add_argument("--density", type=float, default=0.002)
+    pb.add_argument("--magnitude", type=float, default=0.35)
+    pb.add_argument("--no-repair", action="store_true")
+    pb.add_argument("--manifest", help="write a JSON manifest of seed->file->summary")
+    pb.add_argument("-q", "--quiet", action="store_true")
+    pb.set_defaults(func=cmd_batch)
+
+    # sweep
+    psw = sub.add_parser("sweep", help="guided-fuzz region sweep (needs an emulator)")
+    psw.add_argument("input")
+    psw.add_argument("--launch", metavar="CMD", help='emulator command, e.g. "retroarch {ROM}"')
+    psw.add_argument("--block-size", type=lambda s: int(s, 0), default=0x1000)
+    psw.add_argument("--trials", type=int, default=1)
+    psw.add_argument("--boot-time", type=float, default=6.0)
+    psw.add_argument("--timeout", type=float, default=20.0)
+    psw.add_argument("--density", type=float, default=0.05)
+    psw.add_argument("--magnitude", type=float, default=0.6)
+    psw.add_argument("--critical-threshold", type=float, default=0.5)
+    psw.add_argument("--no-repair", action="store_true")
+    psw.add_argument("--report", help="write the heat map as JSON")
+    psw.add_argument("--json", action="store_true")
+    psw.add_argument("-q", "--quiet", action="store_true")
+    psw.set_defaults(func=cmd_sweep)
 
     # scan
     psc = sub.add_parser("scan", help="experimental structure guesses")

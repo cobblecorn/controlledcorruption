@@ -30,6 +30,9 @@ MVP is complete and tested (72 tests). Working today:
 - ✅ External JSON/YAML game profiles (+ an example + a runnable demo)
 - ✅ Emulator launcher (custom command with `{ROM}`)
 - ✅ Differential analysis (turn a modded ROM into regions)
+- ✅ Semantic model/vertex corruption (Level 3: scale/mirror/flatten/… by axis)
+- ✅ Reverse-engineering helpers (hex viewer, search, strings, entropy, scan)
+- ✅ Batch generation across seeds + guided-fuzz region sweep (emulator-agnostic)
 
 The original file is **never** modified, and project files never store ROM
 contents — only hashes and offsets.
